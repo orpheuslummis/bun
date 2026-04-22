@@ -229,11 +229,7 @@ describe("Bun.Terminal subprocess integration", () => {
     // Child never touches process.stdin / process.stderr. It prints READY,
     // waits long enough for the parent to flip termios, then exits normally.
     const proc = Bun.spawn({
-      cmd: [
-        bunExe(),
-        "-e",
-        `process.stdout.write("READY\\n"); setTimeout(() => process.exit(0), 300);`,
-      ],
+      cmd: [bunExe(), "-e", `process.stdout.write("READY\\n"); setTimeout(() => process.exit(0), 300);`],
       env: bunEnv,
       terminal,
     });
