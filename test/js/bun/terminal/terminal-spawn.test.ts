@@ -257,10 +257,13 @@ describe("Bun.Terminal subprocess integration", () => {
     expect(terminal.localFlags & ECHO).toBe(0);
 
     terminal.write("\n");
-    expect(await proc.exited).toBe(0);
+    const exitCode = await proc.exited;
 
+    // Termios assertions before exit code: these are the regression we care
+    // about, and surfacing them first in the diff makes failures read right.
     expect(terminal.localFlags & ICANON).toBe(0);
     expect(terminal.localFlags & ECHO).toBe(0);
+    expect(exitCode).toBe(0);
   });
 
   // Companion to the regression test above: setRawMode still has its own
@@ -308,8 +311,9 @@ describe("Bun.Terminal subprocess integration", () => {
     expect(terminal.localFlags & ECHO).toBe(0);
 
     terminal.write("\n");
-    expect(await proc.exited).toBe(0);
+    const exitCode = await proc.exited;
     expect(terminal.localFlags & ICANON).not.toBe(0);
     expect(terminal.localFlags & ECHO).not.toBe(0);
+    expect(exitCode).toBe(0);
   });
 });
