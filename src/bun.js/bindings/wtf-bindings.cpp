@@ -15,6 +15,7 @@
 #if !OS(WINDOWS)
 #include <stdatomic.h>
 
+#include <signal.h>
 #include <termios.h>
 static int orig_termios_fd = -1;
 static struct termios orig_termios;
@@ -100,7 +101,7 @@ static void uv__tty_make_raw(struct termios* tio)
 extern "C" void Bun__atexit(void (*func)(void));
 
 #if !OS(WINDOWS)
-extern "C" int32_t bun_stdio_modified[3];
+extern "C" volatile sig_atomic_t bun_stdio_modified[3];
 #endif
 
 extern "C" int Bun__ttySetMode(int fd, int mode)

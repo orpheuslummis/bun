@@ -407,7 +407,12 @@ static termios termios_to_restore_later[3];
 // consumer (less, fzf, fx, ...) has since opened /dev/tty and taken over
 // termios, blindly writing our startup snapshot back would clobber their
 // state. See #29592.
-extern "C" int32_t bun_stdio_modified[3] = { 0, 0, 0 };
+//
+// `volatile sig_atomic_t` because bun_restore_stdio() reads this from signal
+// context (onExitSignal, SIGINT/SIGTERM) while Bun__ttySetMode() writes it
+// from normal execution; sig_atomic_t is the only integral type POSIX
+// guarantees can be accessed atomically across that boundary.
+extern "C" volatile sig_atomic_t bun_stdio_modified[3] = { 0, 0, 0 };
 #endif
 
 extern "C" void bun_restore_stdio()

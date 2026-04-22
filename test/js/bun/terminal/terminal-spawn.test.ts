@@ -247,7 +247,11 @@ describe("Bun.Terminal subprocess integration", () => {
     await ready.promise;
 
     // Simulate a downstream consumer (less, fzf, ...) flipping the shared
-    // device to raw mode, then let the child exit.
+    // device to raw mode, then let the child exit. Assert the PTY actually
+    // started cooked so the test can't pass vacuously if Bun.Terminal's
+    // defaults ever change.
+    expect(terminal.localFlags & ICANON).not.toBe(0);
+    expect(terminal.localFlags & ECHO).not.toBe(0);
     terminal.localFlags = terminal.localFlags & ~(ICANON | ECHO);
     expect(terminal.localFlags & ICANON).toBe(0);
     expect(terminal.localFlags & ECHO).toBe(0);
@@ -262,18 +266,48 @@ describe("Bun.Terminal subprocess integration", () => {
   // Companion to the regression test above: setRawMode still has its own
   // restore path via uv_tty_reset_mode's atexit hook. A child that actually
   // modifies termios must leave the device in its pre-setRawMode state.
+  //
+  // Handshake with the child across its entire lifetime so the assertions
+  // distinguish the three cases we care about:
+  //   1. child wrote raw → assert cooked before, raw while live, cooked after
+  //   2. setRawMode became a no-op → "raw while live" assertion fails
+  //   3. our bookkeeping skipped the restore → "cooked after" assertion fails
   test.skipIf(isWindows)("child that called setRawMode restores termios on exit", async () => {
-    await using terminal = new Bun.Terminal({ data() {} });
+    const raw = Promise.withResolvers<void>();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let sawRaw = false;
+    await using terminal = new Bun.Terminal({
+      data(_, chunk: Uint8Array) {
+        if (sawRaw) return;
+        buffer += decoder.decode(chunk, { stream: true });
+        if (buffer.includes("RAW")) {
+          sawRaw = true;
+          raw.resolve();
+        }
+      },
+    });
 
     expect(terminal.localFlags & ICANON).not.toBe(0);
     expect(terminal.localFlags & ECHO).not.toBe(0);
 
+    // Child enters raw mode, announces it, then blocks on stdin so the
+    // parent can observe termios state while the child is still alive.
     const proc = Bun.spawn({
-      cmd: [bunExe(), "-e", `process.stdin.setRawMode(true); process.exit(0);`],
+      cmd: [
+        bunExe(),
+        "-e",
+        `process.stdin.setRawMode(true); process.stdout.write("RAW\\n"); process.stdin.once("data", () => process.exit(0));`,
+      ],
       env: bunEnv,
       terminal,
     });
 
+    await raw.promise;
+    expect(terminal.localFlags & ICANON).toBe(0);
+    expect(terminal.localFlags & ECHO).toBe(0);
+
+    terminal.write("\n");
     expect(await proc.exited).toBe(0);
     expect(terminal.localFlags & ICANON).not.toBe(0);
     expect(terminal.localFlags & ECHO).not.toBe(0);
