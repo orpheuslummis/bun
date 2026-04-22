@@ -234,11 +234,7 @@ describe("Bun.Terminal subprocess integration", () => {
     // termios on the shared device. A timer-based race would silently
     // degrade into a vacuous pass on a slow runner.
     const proc = Bun.spawn({
-      cmd: [
-        bunExe(),
-        "-e",
-        `process.stdout.write("READY\\n"); process.stdin.once("data", () => process.exit(0));`,
-      ],
+      cmd: [bunExe(), "-e", `process.stdout.write("READY\\n"); process.stdin.once("data", () => process.exit(0));`],
       env: bunEnv,
       terminal,
     });
