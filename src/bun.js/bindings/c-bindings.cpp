@@ -400,6 +400,14 @@ extern "C" void Bun__onExit();
 extern "C" int32_t bun_stdio_tty[3];
 #if !OS(WINDOWS)
 static termios termios_to_restore_later[3];
+// Whether Bun itself has modified the termios of each stdio fd during this
+// process's lifetime (e.g. via process.stdin.setRawMode). We only restore the
+// termios state at exit for fds Bun actually touched — termios is a property
+// of the underlying terminal *device*, not the fd, so if a downstream pipeline
+// consumer (less, fzf, fx, ...) has since opened /dev/tty and taken over
+// termios, blindly writing our startup snapshot back would clobber their
+// state. See #29592.
+extern "C" int32_t bun_stdio_modified[3] = { 0, 0, 0 };
 #endif
 
 extern "C" void bun_restore_stdio()
@@ -410,6 +418,11 @@ extern "C" void bun_restore_stdio()
     // restore stdio
     for (int32_t fd = 0; fd < 3; fd++) {
         if (!bun_stdio_tty[fd])
+            continue;
+        // Skip any fd whose termios Bun did not modify during this process. Writing
+        // the startup snapshot back to a terminal device we never touched can
+        // clobber raw mode set by a downstream pipeline consumer. See #29592.
+        if (!bun_stdio_modified[fd])
             continue;
 
         sigset_t sa;
