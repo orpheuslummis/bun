@@ -218,10 +218,15 @@ describe("Bun.Terminal subprocess integration", () => {
   // pipeline consumer (less, fzf, fx, ...). See #29592.
   test.skipIf(isWindows)("child exit does not clobber raw mode on shared tty device", async () => {
     const ready = Promise.withResolvers<void>();
+    // Buffer across chunks so a READY split between two PTY reads still matches.
+    const decoder = new TextDecoder();
+    let buffer = "";
     let sawReady = false;
     await using terminal = new Bun.Terminal({
       data(_, chunk: Uint8Array) {
-        if (!sawReady && new TextDecoder().decode(chunk).includes("READY")) {
+        if (sawReady) return;
+        buffer += decoder.decode(chunk, { stream: true });
+        if (buffer.includes("READY")) {
           sawReady = true;
           ready.resolve();
         }
