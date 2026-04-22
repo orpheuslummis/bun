@@ -206,17 +206,19 @@ describe("Bun.Terminal subprocess integration", () => {
     }
   });
 
+  // termios c_lflag bit layout is platform-specific. These match sys/termios.h:
+  // Linux uses the "System V" layout; Darwin/BSD share the "4.3BSD" layout.
+  const ICANON = process.platform === "darwin" ? 0x100 : 0x2;
+  const ECHO = 0x8; // same on both
+
   // Regression: a Bun child that never calls setRawMode must not write the
   // startup termios snapshot back to the terminal device at exit. Termios is
   // a property of the /dev/pts/* device, not the fd, so restoring here
   // clobbers any raw-mode state set on the same device by a downstream
   // pipeline consumer (less, fzf, fx, ...). See #29592.
   test.skipIf(isWindows)("child exit does not clobber raw mode on shared tty device", async () => {
-    const ICANON = 0x2;
-    const ECHO = 0x8;
-
-    let sawReady = false;
     const ready = Promise.withResolvers<void>();
+    let sawReady = false;
     await using terminal = new Bun.Terminal({
       data(_, chunk: Uint8Array) {
         if (!sawReady && new TextDecoder().decode(chunk).includes("READY")) {
@@ -226,10 +228,17 @@ describe("Bun.Terminal subprocess integration", () => {
       },
     });
 
-    // Child never touches process.stdin / process.stderr. It prints READY,
-    // waits long enough for the parent to flip termios, then exits normally.
+    // Child blocks on stdin until the parent signals it to exit. This makes
+    // the ordering deterministic: the child cannot exit — and therefore
+    // cannot run bun_restore_stdio — until after the parent has flipped
+    // termios on the shared device. A timer-based race would silently
+    // degrade into a vacuous pass on a slow runner.
     const proc = Bun.spawn({
-      cmd: [bunExe(), "-e", `process.stdout.write("READY\\n"); setTimeout(() => process.exit(0), 300);`],
+      cmd: [
+        bunExe(),
+        "-e",
+        `process.stdout.write("READY\\n"); process.stdin.once("data", () => process.exit(0));`,
+      ],
       env: bunEnv,
       terminal,
     });
@@ -244,6 +253,8 @@ describe("Bun.Terminal subprocess integration", () => {
     expect(afterFlip & ICANON).toBe(0);
     expect(afterFlip & ECHO).toBe(0);
 
+    // Tell the child to exit, now that the device is in raw mode.
+    terminal.write("\n");
     expect(await proc.exited).toBe(0);
 
     // Bun's exit path must not have written the cooked snapshot back to the
@@ -257,9 +268,6 @@ describe("Bun.Terminal subprocess integration", () => {
   // restore path via uv_tty_reset_mode's atexit hook. A child that actually
   // modifies termios must leave the device in its pre-setRawMode state.
   test.skipIf(isWindows)("child that called setRawMode restores termios on exit", async () => {
-    const ICANON = 0x2;
-    const ECHO = 0x8;
-
     await using terminal = new Bun.Terminal({ data() {} });
 
     const cookedBefore = terminal.localFlags;
@@ -267,11 +275,7 @@ describe("Bun.Terminal subprocess integration", () => {
     expect(cookedBefore & ECHO).not.toBe(0);
 
     const proc = Bun.spawn({
-      cmd: [
-        bunExe(),
-        "-e",
-        `process.stdin.setRawMode(true); process.stdout.write("READY\\n"); setTimeout(() => process.exit(0), 300);`,
-      ],
+      cmd: [bunExe(), "-e", `process.stdin.setRawMode(true); process.exit(0);`],
       env: bunEnv,
       terminal,
     });
