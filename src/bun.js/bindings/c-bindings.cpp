@@ -419,9 +419,7 @@ extern "C" void bun_restore_stdio()
     for (int32_t fd = 0; fd < 3; fd++) {
         if (!bun_stdio_tty[fd])
             continue;
-        // Skip any fd whose termios Bun did not modify during this process. Writing
-        // the startup snapshot back to a terminal device we never touched can
-        // clobber raw mode set by a downstream pipeline consumer. See #29592.
+        // See bun_stdio_modified declaration for why this check is needed.
         if (!bun_stdio_modified[fd])
             continue;
 

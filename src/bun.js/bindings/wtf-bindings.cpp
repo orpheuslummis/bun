@@ -167,12 +167,11 @@ extern "C" int Bun__ttySetMode(int fd, int mode)
     rc = uv__tcsetattr(fd, TCSADRAIN, &tmp);
     if (rc == 0) {
         current_tty_mode = mode;
-        // Mark this fd as "Bun modified" so bun_restore_stdio will restore it
-        // on signal-driven exit. We also need to mark it on mode==0 (normal)
-        // because the user could call setRawMode(true) then setRawMode(false);
-        // even though current state matches the startup snapshot, the signal
-        // handler path is the only thing that runs on Ctrl-C and we want it
-        // to be a no-op only for fds we never touched. See #29592.
+        // Mark on both raw and cooked transitions: setRawMode(true)→(false)
+        // lands on the startup snapshot but we still need the signal-exit path
+        // to restore it — the Ctrl-C handler only runs this, not our atexit
+        // cleanup. Bounds-check because the PTY master fd from Bun.Terminal
+        // calls through here too. See #29592.
         if (fd >= 0 && fd < 3) {
             bun_stdio_modified[fd] = 1;
         }

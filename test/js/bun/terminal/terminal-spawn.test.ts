@@ -246,23 +246,17 @@ describe("Bun.Terminal subprocess integration", () => {
 
     await ready.promise;
 
-    // Flip the shared terminal device to raw mode, the way `less` or `fzf`
-    // would after opening /dev/tty.
-    const before = terminal.localFlags;
-    terminal.localFlags = before & ~(ICANON | ECHO);
-    const afterFlip = terminal.localFlags;
-    expect(afterFlip & ICANON).toBe(0);
-    expect(afterFlip & ECHO).toBe(0);
+    // Simulate a downstream consumer (less, fzf, ...) flipping the shared
+    // device to raw mode, then let the child exit.
+    terminal.localFlags = terminal.localFlags & ~(ICANON | ECHO);
+    expect(terminal.localFlags & ICANON).toBe(0);
+    expect(terminal.localFlags & ECHO).toBe(0);
 
-    // Tell the child to exit, now that the device is in raw mode.
     terminal.write("\n");
     expect(await proc.exited).toBe(0);
 
-    // Bun's exit path must not have written the cooked snapshot back to the
-    // shared device — raw-mode flags stay off.
-    const afterExit = terminal.localFlags;
-    expect(afterExit & ICANON).toBe(0);
-    expect(afterExit & ECHO).toBe(0);
+    expect(terminal.localFlags & ICANON).toBe(0);
+    expect(terminal.localFlags & ECHO).toBe(0);
   });
 
   // Companion to the regression test above: setRawMode still has its own
@@ -271,9 +265,8 @@ describe("Bun.Terminal subprocess integration", () => {
   test.skipIf(isWindows)("child that called setRawMode restores termios on exit", async () => {
     await using terminal = new Bun.Terminal({ data() {} });
 
-    const cookedBefore = terminal.localFlags;
-    expect(cookedBefore & ICANON).not.toBe(0);
-    expect(cookedBefore & ECHO).not.toBe(0);
+    expect(terminal.localFlags & ICANON).not.toBe(0);
+    expect(terminal.localFlags & ECHO).not.toBe(0);
 
     const proc = Bun.spawn({
       cmd: [bunExe(), "-e", `process.stdin.setRawMode(true); process.exit(0);`],
@@ -282,11 +275,7 @@ describe("Bun.Terminal subprocess integration", () => {
     });
 
     expect(await proc.exited).toBe(0);
-
-    // Bun should have restored cooked mode via its setRawMode-specific
-    // atexit hook.
-    const afterExit = terminal.localFlags;
-    expect(afterExit & ICANON).not.toBe(0);
-    expect(afterExit & ECHO).not.toBe(0);
+    expect(terminal.localFlags & ICANON).not.toBe(0);
+    expect(terminal.localFlags & ECHO).not.toBe(0);
   });
 });
